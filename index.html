@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ZenCodeEdit</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+      background: #111; font-family: monospace;
+    }
+    canvas {
+      display: block;
+      background: #1a1b22;
+      cursor: text;
+      /* Removed transition from canvas itself; handled in animation */
+    }
+    #cmdPalette {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.9);
+      background: #222;
+      color: #fff;
+      border: 1px solid #444;
+      padding: 1em;
+      border-radius: 8px;
+      width: 300px;
+      display: none;
+      box-shadow: 0 0 20px #000;
+      z-index: 10;
+    }
+    #cmdPalette input {
+      width: 90%;
+      background: #111;
+      border: none;
+      color: #fff;
+      padding: 0.5em;
+      outline: none;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="cv"></canvas>
+  <div id="cmdPalette"><input type="text" placeholder="Type a command..."></div>
+
+  <script>
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+    let cw = 12, ch = 18;
+    let buffer = [""];
+    let cx = 0, cy = 0;
+    let selecting = false;
+    let fh;
+
+    // Visual cursor and offsets for smooth animation
+    let visualCursorX = 0;
+    let visualCursorY = 0;
+    let visualOffsetX = 0;
+    let visualOffsetY = 0;
+
+    function resize() {
+      cv.width = window.innerWidth;
+      cv.height = window.innerHeight;
+    }
+    window.onresize = resize;
+    resize();
+
+    window.addEventListener('keydown', e => {
+      const cmdPalette = document.getElementById('cmdPalette');
+
+      if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        autoSave();
+        return;
+      }
+      if (e.ctrlKey && e.key === 'o') {
+        e.preventDefault();
+        triggerOpen();
+        return;
+      }
+      if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+      if (e.ctrlKey && e.key === 'p') {
+        e.preventDefault();
+        toggleCommandPalette();
+        return;
+      }
+      if (cmdPalette.style.display === 'block') return;
+
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        insertChar(e.key);
+      } else if (e.key === 'Backspace') {
+        deleteChar();
+      } else if (e.key === 'Enter') {
+        const line = buffer[cy];
+        buffer.splice(cy + 1, 0, line.slice(cx));
+        buffer[cy] = line.slice(0, cx);
+        cy++; cx = 0;
+      } else if (e.key === 'ArrowLeft') {
+        if (cx > 0) cx--;
+        else if (cy > 0) {
+          cy--;
+          cx = buffer[cy].length;
+        }
+      } else if (e.key === 'ArrowRight') {
+        if (cx < buffer[cy].length) cx++;
+        else if (cy < buffer.length - 1) {
+          cy++;
+          cx = 0;
+        }
+      } else if (e.key === 'ArrowUp') {
+        if (cy > 0) {
+          cy--;
+          cx = Math.min(cx, buffer[cy].length);
+        }
+      } else if (e.key === 'ArrowDown') {
+        if (cy < buffer.length - 1) {
+          cy++;
+          cx = Math.min(cx, buffer[cy].length);
+        }
+      }
+      e.preventDefault();
+      autoSave();
+    });
+
+    function insertChar(ch) {
+      buffer[cy] = buffer[cy].slice(0, cx) + ch + buffer[cy].slice(cx);
+      cx++;
+    }
+
+    function deleteChar() {
+      if (cx > 0) {
+        buffer[cy] = buffer[cy].slice(0, cx - 1) + buffer[cy].slice(cx);
+        cx--;
+      } else if (cy > 0) {
+        const prevLine = buffer[cy - 1];
+        cx = prevLine.length;
+        buffer[cy - 1] += buffer[cy];
+        buffer.splice(cy, 1);
+        cy--;
+      }
+    }
+
+    function selectAll() {
+      cy = 0;
+      cx = 0;
+      selecting = true;
+    }
+
+    window.addEventListener('paste', e => {
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (i === 0) {
+          buffer[cy] = buffer[cy].slice(0, cx) + lines[i] + buffer[cy].slice(cx);
+          cx += lines[i].length;
+        } else {
+          const nextPart = buffer[cy].slice(cx);
+          buffer[cy] = buffer[cy].slice(0, cx);
+          buffer.splice(cy + 1, 0, lines[i] + nextPart);
+          cy++;
+          cx = lines[i].length;
+        }
+      }
+      autoSave();
+    });
+
+    function toggleCommandPalette() {
+      const palette = document.getElementById('cmdPalette');
+      if (palette.style.display === 'block') {
+        palette.style.display = 'none';
+      } else {
+        palette.style.display = 'block';
+        palette.querySelector('input').value = '';
+        palette.querySelector('input').focus();
+      }
+    }
+
+    async function triggerOpen() {
+      [fh] = await window.showOpenFilePicker();
+      const file = await fh.getFile();
+      const txt = await file.text();
+      buffer = txt.split('\n');
+      cx = cy = 0;
+    }
+
+    async function autoSave() {
+      if (!fh) return;
+      const w = await fh.createWritable();
+      await w.write(buffer.join('\n'));
+      await w.close();
+    }
+
+    function draw() {
+      requestAnimationFrame(draw);
+
+      ctx.font = `${ch}px monospace`;
+      ctx.textBaseline = "top";
+
+      // Calculate target cursor position in pixels
+      const beforeCursor = buffer[cy].slice(0, cx);
+      const cursorXRaw = ctx.measureText(beforeCursor).width;
+
+      const lineHeight = ch;
+      const gutterWidth = 40;
+      const visibleLines = Math.floor(cv.height / lineHeight);
+      const scrollStart = Math.max(0, cy - Math.floor(visibleLines / 2));
+      const offsetYTarget = (cv.height / 2) - (cy - scrollStart) * lineHeight;
+      const offsetXTarget = (cv.width / 2) - cursorXRaw;
+
+      // Smoothly interpolate visual positions with easing factor
+      const ease = 0.2;
+      visualCursorX += (cv.width / 2 - visualCursorX) * ease;
+      visualCursorY += (offsetYTarget - visualCursorY) * ease;
+      visualOffsetX += (offsetXTarget - visualOffsetX) * ease;
+      visualOffsetY += (offsetYTarget - visualOffsetY) * ease;
+
+      // Clear canvas
+      ctx.fillStyle = '#1a1b22';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+
+      // Draw lines and line numbers with smooth offset
+      for (let y = 0; y < buffer.length; y++) {
+        const lineY = visualOffsetY + (y - scrollStart) * lineHeight;
+        if (lineY < -lineHeight || lineY > cv.height) continue;
+
+        ctx.fillStyle = '#444';
+        ctx.fillText((y + 1).toString().padStart(3, ' '), visualOffsetX - gutterWidth + 5, lineY);
+
+        ctx.fillStyle = selecting ? '#0f0' : '#ddd';
+        ctx.fillText(buffer[y], visualOffsetX, lineY);
+      }
+
+      // Draw blinking cursor - keep visible always for smoothness
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.fillRect(visualCursorX, visualCursorY, 2, lineHeight);
+
+      selecting = false;
+    }
+
+    draw();
+  </script>
+</body>
+</html>
