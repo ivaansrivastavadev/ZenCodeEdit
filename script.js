@@ -287,3 +287,11 @@
     }
 
     draw();
+    // Ensure the keyboard button works on mobile by focusing an input or showing a keyboard popup
+    document.getElementById('showKeyboardBtn').addEventListener('click', function() {
+      // Try to focus the command palette input to trigger the keyboard
+      var cmdInput = document.querySelector('#cmdPalette input');
+      if (cmdInput) {
+        cmdInput.focus();
+      }
+    });

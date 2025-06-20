@@ -1,3 +1,3 @@
 # ZenCodeEdit
 The smoothest editor
-`inspired by Griddycode` [OPEN](https://github.com/face-hh/griddycode)
+`inspired by [Griddycode](https://github.com/face-hh/griddycode)`
