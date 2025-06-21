@@ -11,7 +11,8 @@
     document.getElementById('closeSelectTextPopup').onclick = function() {
       document.getElementById('selectTextPopup').style.display = 'none';
     };
-  // Open file button logic
+
+    // Open file button logic
     document.getElementById('openFileBtn').onclick = () => {
       document.getElementById('folderIcon').click();
     };
@@ -34,10 +35,11 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(a.href);
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
       }, 100);
     };
+
     document.getElementById('folderIcon').onchange = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -46,6 +48,7 @@
       cx = cy = 0;
       autoSave();
     };
+
     // Show keyboard button logic
     document.getElementById('showKeyboardBtn').onclick = () => {
       showMobileKeyboard();
@@ -64,6 +67,10 @@
     let visualCursorY = 0;
     let visualOffsetX = 0;
     let visualOffsetY = 0;
+
+    // Glow settings
+    let glowBlur = 8;
+    let glowColor = '#00f0ff';
 
     function resize() {
       cv.width = window.innerWidth;
@@ -129,7 +136,7 @@
         showMobileKeyboard();
         return;
       }
-      if (cmdPalette.style.display === 'block') return;
+      if (cmdPalette && cmdPalette.style.display === 'block') return;
 
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
         insertChar(e.key);
@@ -211,6 +218,7 @@
 
     function toggleCommandPalette() {
       const palette = document.getElementById('cmdPalette');
+      if (!palette) return;
       if (palette.style.display === 'block') {
         palette.style.display = 'none';
       } else {
@@ -235,13 +243,74 @@
       await w.close();
     }
 
+    // Add glow effect to text rendering
+    function drawTextWithGlow(ctx, text, x, y, color = '#fff', glowColor = '#fff', glowBlur = 8) {
+      ctx.save();
+      ctx.shadowColor = '#fff';
+      ctx.shadowBlur = glowBlur;
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
+      ctx.restore();
+    }
+
+    // Add glow settings to settings modal if not present
+    function addGlowSettings() {
+      const settings = document.getElementById('settingsModal');
+      if (!settings || document.getElementById('glowBlurSlider')) return;
+
+      const glowDiv = document.createElement('div');
+      glowDiv.style.marginTop = '1em';
+
+      // Blur slider
+      const blurLabel = document.createElement('label');
+      blurLabel.textContent = 'Glow Blur: ';
+      const blurSlider = document.createElement('input');
+      blurSlider.type = 'range';
+      blurSlider.min = 0;
+      blurSlider.max = 32;
+      blurSlider.value = glowBlur;
+      blurSlider.id = 'glowBlurSlider';
+      blurSlider.style.verticalAlign = 'middle';
+      const blurValue = document.createElement('span');
+      blurValue.textContent = glowBlur;
+      blurSlider.oninput = function() {
+        glowBlur = parseInt(this.value, 10);
+        blurValue.textContent = glowBlur;
+      };
+
+      blurLabel.appendChild(blurSlider);
+      blurLabel.appendChild(blurValue);
+      glowDiv.appendChild(blurLabel);
+
+      // Color picker
+      const colorLabel = document.createElement('label');
+      colorLabel.textContent = ' Glow Color: ';
+      const colorInput = document.createElement('input');
+      colorInput.type = 'color';
+      colorInput.value = glowColor;
+      colorInput.id = 'glowColorInput';
+      colorInput.oninput = function() {
+        glowColor = this.value;
+      };
+      colorLabel.appendChild(colorInput);
+      glowDiv.appendChild(colorLabel);
+
+      settings.appendChild(glowDiv);
+    }
+
+    // Patch toggleSettings to add glow settings
+    const origToggleSettings = window.toggleSettings;
+    window.toggleSettings = function() {
+      origToggleSettings && origToggleSettings();
+      addGlowSettings();
+    };
+
     function draw() {
       requestAnimationFrame(draw);
 
       ctx.font = `${ch}px monospace`;
       ctx.textBaseline = "top";
 
-      // Calculate target cursor position in pixels
       const beforeCursor = buffer[cy].slice(0, cx);
       const cursorXRaw = ctx.measureText(beforeCursor).width;
 
@@ -252,41 +321,39 @@
       const offsetYTarget = (cv.height / 2) - (cy - scrollStart) * lineHeight;
       const offsetXTarget = (cv.width / 2) - cursorXRaw;
 
-      // Calculate the actual cursor position in the editor
       const cursorXTarget = visualOffsetX + cursorXRaw;
       const cursorYTarget = visualOffsetY + (cy - scrollStart) * lineHeight;
 
-      // Smoothly interpolate visual positions with easing factor
       const ease = 0.2;
       visualCursorX += (cursorXTarget - visualCursorX) * ease;
       visualCursorY += (cursorYTarget - visualCursorY) * ease;
       visualOffsetX += (offsetXTarget - visualOffsetX) * ease;
       visualOffsetY += (offsetYTarget - visualOffsetY) * ease;
 
-      // Clear canvas
       ctx.fillStyle = '#1a1b22';
       ctx.fillRect(0, 0, cv.width, cv.height);
 
-      // Draw lines and line numbers with smooth offset
       for (let y = 0; y < buffer.length; y++) {
         const lineY = visualOffsetY + (y - scrollStart) * lineHeight;
         if (lineY < -lineHeight || lineY > cv.height) continue;
 
-        ctx.fillStyle = '#444';
-        ctx.fillText((y + 1).toString().padStart(3, ' '), visualOffsetX - gutterWidth + 5, lineY);
+        // Glow for line numbers
+        drawTextWithGlow(ctx, (y + 1).toString().padStart(3, ' '), visualOffsetX - gutterWidth + 5, lineY, '#444', glowColor, 6);
 
-        ctx.fillStyle = selecting ? '#0f0' : '#ddd';
-        ctx.fillText(buffer[y], visualOffsetX, lineY);
+        // Glow for code text
+        drawTextWithGlow(ctx, buffer[y], visualOffsetX, lineY, selecting ? '#0f0' : '#ddd', glowColor, glowBlur);
       }
 
-      // Draw blinking cursor - keep visible always for smoothness
-      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
       ctx.fillRect(visualCursorX, visualCursorY, 2, lineHeight);
+      ctx.restore();
 
       selecting = false;
     }
 
     draw();
+
     // Ensure the keyboard button works on mobile by focusing an input or showing a keyboard popup
     document.getElementById('showKeyboardBtn').addEventListener('click', function() {
       // Try to focus the command palette input to trigger the keyboard
@@ -295,3 +362,66 @@
         cmdInput.focus();
       }
     });
+    /* Patch drawTextWithGlow to not use glow for line numbers */
+    const origDrawTextWithGlow = drawTextWithGlow;
+    drawTextWithGlow = function(ctx, text, x, y, color = '#fff', glowColor = '#fff', glowBlur = 8, noGlow = false) {
+      if (noGlow) {
+        ctx.save();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+        ctx.restore();
+      } else {
+        origDrawTextWithGlow(ctx, text, x, y, color, glowColor, glowBlur);
+      }
+    };
+
+    /* Patch draw to use noGlow for line numbers */
+    const origDraw = draw;
+    draw = function() {
+      requestAnimationFrame(draw);
+
+      ctx.font = `${ch}px monospace`;
+      ctx.textBaseline = "top";
+
+      const beforeCursor = buffer[cy].slice(0, cx);
+      const cursorXRaw = ctx.measureText(beforeCursor).width;
+
+      const lineHeight = ch;
+      const gutterWidth = 40;
+      const visibleLines = Math.floor(cv.height / lineHeight);
+      const scrollStart = Math.max(0, cy - Math.floor(visibleLines / 2));
+      const offsetYTarget = (cv.height / 2) - (cy - scrollStart) * lineHeight;
+      const offsetXTarget = (cv.width / 2) - cursorXRaw;
+
+      const cursorXTarget = visualOffsetX + cursorXRaw;
+      const cursorYTarget = visualOffsetY + (cy - scrollStart) * lineHeight;
+
+      const ease = 0.2;
+      visualCursorX += (cursorXTarget - visualCursorX) * ease;
+      visualCursorY += (cursorYTarget - visualCursorY) * ease;
+      visualOffsetX += (offsetXTarget - visualOffsetX) * ease;
+      visualOffsetY += (offsetYTarget - visualOffsetY) * ease;
+
+      ctx.fillStyle = '#1a1b22';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+
+      for (let y = 0; y < buffer.length; y++) {
+        const lineY = visualOffsetY + (y - scrollStart) * lineHeight;
+        if (lineY < -lineHeight || lineY > cv.height) continue;
+
+        // No glow for line numbers
+        drawTextWithGlow(ctx, (y + 1).toString().padStart(3, ' '), visualOffsetX - gutterWidth + 5, lineY, '#444', glowColor, 6, true);
+
+        // Glow for code text
+        drawTextWithGlow(ctx, buffer[y], visualOffsetX, lineY, selecting ? '#0f0' : '#ddd', glowColor, glowBlur);
+      }
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.fillRect(visualCursorX, visualCursorY, 2, lineHeight);
+      ctx.restore();
+
+      selecting = false;
+    };
+    draw();
